@@ -36,7 +36,7 @@ class Gebruikers_Schema(MM.Schema):
 
 class Gebruiker(Resource):
     """Deze resource vertegenwoordigd de Gebruikers van de applicaite"""
-    @jwt_required
+    @jwt_required()
     def get(self, gebruiker_uuid=None):
         with pyodbc.connect(db_connection_settings) as cnx:
             cur = cnx.cursor()

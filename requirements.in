@@ -1,0 +1,14 @@
+flask
+beautifulsoup4
+Flask-JWT-Extended
+Flask-RESTful
+marshmallow
+openapi-spec-validator
+pyodbc
+pytest
+pytest-dotenv
+diff_match_patch
+pip-tools
+flask_cors
+passlib
+bcrypt

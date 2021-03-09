@@ -129,6 +129,7 @@ def parse_query_args(q_args, valid_filters, filter_schema):
         parsed['filters'] = filter_schema.load(parsed['filters'])
     return parsed
 
+
 class Schema_Resource(Resource):
     """
     A base class that accepts a Marshmallow schema as configuration
@@ -143,7 +144,7 @@ class Lineage(Schema_Resource):
     A lineage is a list of all object that have the same ID, ordered by modified date.
     This represents the history of an object in our database.
     """
-
+    @jwt_required()
     def get(self, id):
         """
         GET endpoint for a lineage.
@@ -157,36 +158,35 @@ class Lineage(Schema_Resource):
         except MM.exceptions.ValidationError as e:
             # Invalid filter values
             return handle_validation_filter_exception(e)
-        
+
         # Retrieve all the fields we want to query
         included_fields = ', '.join(
             [field for field in self.schema().fields_without_props('referencelist')])
 
         query = f'''SELECT {included_fields} FROM {self.schema().Meta.table} WHERE ID = ?'''
-        
 
         # Id is required
         query_args = [id]
-        
-        if filters:= q_args['filters']:
+
+        if filters := q_args['filters']:
             query += ' AND ' + \
                 'OR '.join(f'{key} = ? ' for key in filters)
             query_args = [filters[key] for key in filters]
-        
+
         query += ''' AND UUID != '00000000-0000-0000-0000-000000000000' ORDER BY Modified_Date DESC'''
 
         query += " OFFSET ? ROWS"
         query_args.append(int(q_args['offset']))
 
-        if limit:= q_args['limit']:
+        if limit := q_args['limit']:
             query += " FETCH NEXT ? ROWS ONLY"
-            query_args.append(int(limit))     
+            query_args.append(int(limit))
 
         with pyodbc.connect(db_connection_settings) as connection:
             cursor = connection.cursor()
             return(get_objects(query, query_args, self.schema(), cursor))
 
-    @jwt_required
+    @jwt_required()
     def patch(self, id):
         """
         PATCH endpoint for a lineage.
@@ -246,6 +246,7 @@ class FullList(Schema_Resource):
     showing the latests version of each object's lineage.
     """
 
+    @jwt_required()
     def get(self):
         """
         GET endpoint for a list of objects, shows the last object for each lineage
@@ -270,7 +271,7 @@ class FullList(Schema_Resource):
 
         query_args = []
 
-        if filters:= q_args['filters']:
+        if filters := q_args['filters']:
             query += ' AND ' + \
                 'OR '.join(f'{key} = ? ' for key in filters)
             query_args = [filters[key] for key in filters]
@@ -280,7 +281,7 @@ class FullList(Schema_Resource):
         query += " OFFSET ? ROWS"
         query_args.append(int(q_args['offset']))
 
-        if limit:= q_args['limit']:
+        if limit := q_args['limit']:
             query += " FETCH NEXT ? ROWS ONLY"
             query_args.append(int(limit))
 
@@ -288,7 +289,7 @@ class FullList(Schema_Resource):
             cursor = connection.cursor()
             return(get_objects(query, query_args, self.schema(), cursor))
 
-    @jwt_required
+    @jwt_required()
     def post(self):
         """
         POST endpoint for this object.
@@ -345,9 +346,6 @@ class ValidList(Schema_Resource):
         """
         GET endpoint for a list of objects, shows the last valid object for each lineage
         """
-        if not self.schema.Meta.status_conf:
-            return {'message': 'This object does not have a status configuration'}, 404
-
         try:
             q_args = parse_query_args(
                 request.args, self.schema().fields_without_props('referencelist'), self.schema(partial=True))
@@ -358,23 +356,29 @@ class ValidList(Schema_Resource):
             # Invalid filter values
             return handle_validation_filter_exception(e)
 
-
         # Retrieve all the fields we want to query
         included_fields = ', '.join(
             [field for field in self.schema().fields_without_props('referencelist')])
 
-        status_field, status_value = self.schema.Meta.status_conf
+        if not self.schema.Meta.status_conf:
+            query = f'''SELECT {included_fields} FROM (SELECT {included_fields}, 
+                        ROW_NUMBER() OVER (PARTITION BY [ID] ORDER BY [Modified_Date] DESC) [RowNumber] 
+                        FROM {self.schema().Meta.table}) T WHERE RowNumber = 1'''
 
-        query = f'''SELECT {included_fields} FROM
+            query_args = []
+        else:
+            status_field, status_value = self.schema.Meta.status_conf
+
+            query = f'''SELECT {included_fields} FROM
                         (SELECT {included_fields}, Row_number() OVER (partition BY [ID]
                         ORDER BY [Modified_date] DESC) [RowNumber]
                         FROM {self.schema().Meta.table}
                         WHERE {status_field} = ? AND UUID != '00000000-0000-0000-0000-000000000000') T 
-                    WHERE rownumber = 1'''
-        
-        query_args = [status_value]
-        
-        if filters:= q_args['filters']:
+                        WHERE rownumber = 1'''
+
+            query_args = [status_value]
+
+        if filters := q_args['filters']:
             query += ' AND ' + \
                 'OR '.join(f'{key} = ? ' for key in filters)
             query_args = [filters[key] for key in filters]
@@ -384,7 +388,7 @@ class ValidList(Schema_Resource):
         query += " OFFSET ? ROWS"
         query_args.append(int(q_args['offset']))
 
-        if limit:= q_args['limit']:
+        if limit := q_args['limit']:
             query += " FETCH NEXT ? ROWS ONLY"
             query_args.append(int(limit))
 

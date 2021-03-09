@@ -13,6 +13,7 @@ from datamodel import endpoints
 from Tests.test_data import generate_data, reference_rich_beleidskeuze
 from globals import db_connection_settings, min_datetime
 from Endpoints.references import UUID_List_Reference
+from werkzeug.datastructures import Headers
 import copy
 from flask import jsonify
 import datetime
@@ -55,6 +56,10 @@ def client():
     """
     return app.test_client()
 
+@pytest.fixture
+def app_context():
+    with app.app_context():
+        yield
 
 @pytest.fixture
 def auth(client, test_user_identifier, test_user_pass):
@@ -65,7 +70,8 @@ def auth(client, test_user_identifier, test_user_pass):
         '/v0.1/login', json={'identifier': test_user_identifier, 'password': test_user_pass})
     if not resp.status_code == 200:
         pytest.fail(f'Unable to authenticate with API: {resp.get_json()}')
-    return (resp.get_json()['identifier']['UUID'], resp.get_json()['access_token'])
+    token = resp.get_json()['access_token']
+    return {'Authorization': f'Bearer {token}'}
 
 
 @pytest.fixture(scope="module")
@@ -92,48 +98,70 @@ def cleanup():
                 f"DELETE FROM {table.Meta.table} WHERE Created_By = ?", test_uuid)
 
 
-@pytest.mark.parametrize('endpoint', endpoints, ids=(map(lambda ep: ep.Meta.slug, endpoints)))
-def test_endpoints(client, test_user_UUID, auth, cleanup, endpoint):
-    if endpoint.Meta.slug == 'beleidsrelaties':
-        return
+@pytest.mark.parametrize('endpoint', endpoints, ids=(filter(lambda slug: slug != 'beleidsrelaties', map(lambda ep: ep.Meta.slug, endpoints))))
+def test_get_valid_endpoints(client, auth, cleanup, endpoint):
+    valid_ep = f"v0.1/valid/{endpoint.Meta.slug}"
+    response = client.get(valid_ep)
+    assert response.status_code == 200, f"Status code for GET on {valid_ep} was {response.status_code}, should be 200. Response body: {response.get_json()}"
+
+@pytest.mark.parametrize('endpoint', endpoints, ids=(filter(lambda slug: slug != 'beleidsrelaties', map(lambda ep: ep.Meta.slug, endpoints))))
+def test_get_endpoints(client, auth, cleanup, endpoint):    
     list_ep = f"v0.1/{endpoint.Meta.slug}"
-    response = client.get(list_ep)
-    found = len(response.json)
+    response = client.get(list_ep, headers=auth)
     assert response.status_code == 200, f"Status code for GET on {list_ep} was {response.status_code}, should be 200. Response body: {response.get_json()}"
 
-    t_uuid = response.json[0]['UUID']
-    version_ep = f"v0.1/version/{endpoint.Meta.slug}/{t_uuid}"
-    response = client.get(version_ep)
-    assert response.status_code == 200, f"Status code for GET on {version_ep} was {response.status_code}, should be 200."
+@pytest.mark.parametrize('endpoint', endpoints, ids=(filter(lambda slug: slug != 'beleidsrelaties', map(lambda ep: ep.Meta.slug, endpoints))))
+def test_get_single_valid_endpoints(client, auth, cleanup, endpoint):
+    pass
 
-    if not endpoint.Meta.read_only:
-        test_data = generate_data(
-            endpoint, user_UUID=test_user_UUID, excluded_prop='excluded_post')
+# TODO:
+# - Refactor more tests
+# - Change ValidLineage to accept non-status objects
+# - Update Apispec
 
-        response = client.post(list_ep, json=test_data, headers={
-                               'Authorization': f'Bearer {auth[1]}'})
 
-        assert response.status_code == 201, f"Status code for POST on {list_ep} was {response.status_code}, should be 201. Body content: {response.json}"
+# def test_endpoints(client, test_user_UUID, auth, cleanup, app_context, endpoint):
+#     if endpoint.Meta.slug == 'beleidsrelaties':
+#         return
+#     valid_ep = f"v0.1/valid/{endpoint.Meta.slug}"
+#     list_ep = f"v0.1/{endpoint.Meta.slug}"
+#     response = client.get(list_ep, headers={'Authorization': f'Bearer {auth[1]}'})
+#     found = len(response.json)
+#     assert response.status_code == 200, f"Status code for GET on {valid_ep} was {response.status_code}, should be 200. Response body: {response.get_json()}"
 
-        new_id = response.get_json()['ID']
+#     t_uuid = response.json[0]['UUID']
+#     version_ep = f"v0.1/version/{endpoint.Meta.slug}/{t_uuid}"
+#     response = client.get(version_ep)
+#     assert response.status_code == 200, f"Status code for GET on {version_ep} was {response.status_code}, should be 200."
 
-        response = client.get(list_ep)
-        assert found + 1 == len(response.json), 'No new object after POST'
+#     if not endpoint.Meta.read_only:
+#         test_data = generate_data(
+#             endpoint, user_UUID=test_user_UUID, excluded_prop='excluded_post')
 
-        response = client.patch(list_ep + '/' + str(new_id), json={
-                                'Begin_Geldigheid': '1994-11-23T10:00:00Z'}, headers={'Authorization': f'Bearer {auth[1]}'})
-        assert response.status_code == 200, f'Status code for PATCH on {list_ep} was {response.status_code}, should be 200. Body contents: {response.json}'
+#         response = client.post(list_ep, json=test_data, headers={'Authorization': f'Bearer {auth[1]}'})
 
-        response = client.get(list_ep + '/' + str(new_id))
-        assert response.json[0]['Begin_Geldigheid'] == '1994-11-23T10:00:00Z', 'Patch did not change object.'
-        response = client.get(list_ep)
-        assert found + 1 == len(response.json), "New object after PATCH"
+       
+#         assert response.status_code == 201, f"Status code for POST on {list_ep} was {response.status_code}, should be 201. Body content: {response.json}"
+
+#         new_id = response.get_json()['ID']
+
+#         response = client.get(list_ep, headers={'Authorization': f'Bearer {auth[1]}'})
+#         assert response.status_code == 200, f"Status code for GET on {list_ep} was {response.status_code}, should be 201. Body content: {response.json}"
+#         assert found + 1 == len(response.json), 'No new object after POST'
+
+#         response = client.patch(list_ep + '/' + str(new_id), json={
+#                                 'Begin_Geldigheid': '1994-11-23T10:00:00Z'}, headers={'Authorization': f'Bearer {auth[1]}'})
+#         assert response.status_code == 200, f'Status code for PATCH on {list_ep} was {response.status_code}, should be 200. Body contents: {response.json}'
+
+#         response = client.get(list_ep + '/' + str(new_id), headers={'Authorization': f'Bearer {auth[1]}'})
+#         assert response.json[0]['Begin_Geldigheid'] == '1994-11-23T10:00:00Z', 'Patch did not change object.'
+#         response = client.get(list_ep, headers={'Authorization': f'Bearer {auth[1]}'})
+#         assert found + 1 == len(response.json), "New object after PATCH"
 
 
 def test_references(client, test_user_UUID, auth, cleanup):
     ep = f"v0.1/beleidskeuzes"
-    response = client.post(ep, json=reference_rich_beleidskeuze, headers={
-                           'Authorization': f'Bearer {auth[1]}'})
+    response = client.post(ep, data=reference_rich_beleidskeuze, headers=auth)
 
     assert response.status_code == 201, f"Status code for POST on {ep} was {response.status_code}, should be 201. Body content: {response.json}"
 
@@ -144,19 +172,12 @@ def test_references(client, test_user_UUID, auth, cleanup):
     assert len(response.get_json()[0]['Ambities']
                ) == 2, 'References not retrieved'
 
-    response = client.patch(ep, json={'Titel': 'Changed Title TEST'}, headers={
-                            'Authorization': f'Bearer {auth[1]}'})
+    response = client.patch(ep, json={'Titel': 'Changed Title TEST'}, headers=auth)
     assert response.status_code == 200, 'Patch failed'
     assert response.get_json(
     )['Titel'] == 'Changed Title TEST', 'Patch did not change title'
     assert len(response.get_json()['Ambities']
                ) == 2, 'Patch did not copy references'
-
-
-def test_status_404(client, test_user_UUID, auth, cleanup):
-    ep = f"v0.1/valid/ambities"
-    response = client.get(ep)
-    assert response.status_code == 404, 'This endpoint should not exist'
 
 
 def test_status(client, test_user_UUID, auth, cleanup):
@@ -202,7 +223,7 @@ def test_pagination_limit(client, endpoint):
     if response.get_json():
         assert len(response.get_json()) <= 10, 'Does not limit amount of results'
 
-@pytest.mark.parametrize('endpoint', endpoints, ids=(map(lambda ep: ep.Meta.slug, endpoints)))
+@pytest.mark.parametrize('endpoint', endpoints, ids=(filter(lambda slug: slug != 'beleidsrelaties', map(lambda ep: ep.Meta.slug, endpoints))))
 def test_pagination_offset(client, endpoint):
     ep = f"v0.1/{endpoint}"
     response = client.get(ep)
@@ -217,8 +238,7 @@ def test_null_geldigheid(client, test_user_UUID, auth, cleanup):
             beleidskeuzes.Beleidskeuzes_Schema, user_UUID=test_user_UUID, excluded_prop='excluded_post')
     test_data['Begin_Geldigheid'] = None
     # print(json.dumps(test_data))
-    response = client.post(ep, json=test_data, headers={
-                           'Authorization': f'Bearer {auth[1]}'})
+    response = client.post(ep, json=test_data, headers=auth)
     assert response.status_code == 201, f"Status code for POST on {ep} was {response.status_code}, should be 201. Body content: {response.json}"
     
     new_uuid = response.get_json()['UUID']
@@ -232,8 +252,7 @@ def test_empty_referencelists(client, test_user_UUID, auth, cleanup):
     ep = f"v0.1/beleidskeuzes"
     empty_reference_beleidskeuze = copy.deepcopy(reference_rich_beleidskeuze)
     empty_reference_beleidskeuze['Ambities'] = []
-    response = client.post(ep, json=empty_reference_beleidskeuze, headers={
-                           'Authorization': f'Bearer {auth[1]}'})
+    response = client.post(ep, json=empty_reference_beleidskeuze, headers=auth)
     assert response.status_code == 201, f"Status code for POST on {ep} was {response.status_code}, should be 201. Body content: {response.json}"
     
     new_uuid = response.get_json()['UUID']
@@ -245,15 +264,14 @@ def test_empty_referencelists(client, test_user_UUID, auth, cleanup):
     assert response.get_json()['Ambities'] == [], 'Ambities should be an empty list'
     
     ep = f"v0.1/ambities"
-    response = client.post(ep, json=generate_data(ambities.Ambities_Schema, user_UUID=test_user_UUID, excluded_prop='excluded_patch') , headers={
-                           'Authorization': f'Bearer {auth[1]}'})
+    response = client.post(ep, json=generate_data(ambities.Ambities_Schema, user_UUID=test_user_UUID, excluded_prop='excluded_patch') , headers=
+                           auth)
     new_uuid = response.get_json()['UUID']
     
     ep = f"v0.1/beleidskeuzes/{new_id}"
-    response = client.patch(ep, json={'Ambities': [{'UUID':new_uuid}]}, headers={
-                           'Authorization': f'Bearer {auth[1]}'})
+    response = client.patch(ep, json={'Ambities': [{'UUID':new_uuid}]}, headers=
+                           auth)
     print(response.get_json())
     assert len(response.get_json()['Ambities']) == 1
-    response = client.patch(ep, json={'Ambities': []}, headers={
-                           'Authorization': f'Bearer {auth[1]}'})
+    response = client.patch(ep, json={'Ambities': []}, headers=auth)
     assert len(response.get_json()['Ambities']) == 0

@@ -7,8 +7,8 @@ from flask_jwt_extended import (
     decode_token,
     get_jwt_identity,
     jwt_required,
-    get_raw_jwt,
-    verify_jwt_in_request
+    verify_jwt_in_request,
+    get_jwt
 )
 from passlib.hash import bcrypt
 from globals import db_connection_settings, row_to_dict
@@ -47,28 +47,14 @@ def login():
                 raw_token = decode_token(access_token)
                 return jsonify({'access_token':access_token, 
                                 'expires':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.localtime(raw_token['exp'])),
-                                'identifier':raw_token['identity'],
+                                'identifier':raw_token['sub'],
                                 'deployment type':os.getenv('API_ENV')}), 200    
     return jsonify(
         {"message": "Wachtwoord of gebruikersnaam ongeldig"}), 401
     
-@jwt_required
+@jwt_required()
 def tokenstat():
-    raw_jwt = get_raw_jwt()
     return jsonify({
     'identifier': get_jwt_identity(), 
-    'expires':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.localtime(raw_jwt['exp']))
+    'expires':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.localtime(get_jwt['exp']))
     })
-
-def jwt_required_not_GET(fn):
-    """
-    Only requires a JWT on a non GET request
-    """
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if request.method != 'GET':
-            verify_jwt_in_request()
-            return fn(*args, **kwargs)
-        else:
-            return fn(*args, **kwargs)
-    return wrapper

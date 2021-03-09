@@ -13,7 +13,7 @@ from flask_restful import Api, Resource
 
 import datamodel
 import Endpoints.endpoint
-from Auth.views import jwt_required_not_GET, login, tokenstat
+from Auth.views import login, tokenstat
 from Models import gebruikers, verordeningsstructuur
 from Spec.spec import specView
 from Endpoints.search import searchView
@@ -28,8 +28,7 @@ app = Flask(__name__)
 CORS(app)
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=4)
-api = Api(app, prefix=f'/v{current_version}',
-          decorators=[jwt_required_not_GET, ])
+api = Api(app, prefix=f'/v{current_version}')
 jwt = JWTManager(app)
 
 
